@@ -51,7 +51,7 @@ A window-event hook keeps the widget above the taskbar as soon as focus changes.
 Build and install to `%LOCALAPPDATA%\Programs\SpotifyBar`:
 
 ```powershell
-git clone https://github.com/<your-username>/SpotifyBar.git
+git clone https://github.com/DimaShevchenkoo/SpotifyBar.git
 cd SpotifyBar
 dotnet publish -c Release -r win-x64 --no-self-contained -p:PublishSingleFile=true -p:DebugType=none -o "$env:LOCALAPPDATA\Programs\SpotifyBar"
 & "$env:LOCALAPPDATA\Programs\SpotifyBar\SpotifyBar.exe"
