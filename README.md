@@ -2,14 +2,14 @@
 
 **A tiny Spotify mini-player that lives right on your Windows 11 taskbar.**
 
-See what's playing, pause, skip, and scrub through the track without ever opening the Spotify window.
+See what's playing, pause, skip, scrub through the track, and change Spotify's volume without ever opening the Spotify window.
 
 ![SpotifyBar on the Windows 11 taskbar](docs/hero.png)
 
 <p align="center">
-  <img src="docs/playing.png" width="340" alt="Playing">
+  <img src="docs/playing.png" width="370" alt="Playing">
   &nbsp;&nbsp;
-  <img src="docs/paused.png" width="340" alt="Paused">
+  <img src="docs/paused.png" width="370" alt="Paused">
 </p>
 
 ## Features
@@ -18,10 +18,22 @@ See what's playing, pause, skip, and scrub through the track without ever openin
 - **Progress ring**: playback progress is drawn as a ring around the cover.
 - **Playback controls**: previous, play / pause, and next.
 - **Seeking**: click anywhere on the ring to jump to that point, or scroll the mouse wheel over the widget to move ±5 seconds.
+- **Volume**: a speaker button opens a slider for Spotify's volume. You can also scroll over the speaker to change it in 5% steps, or mute Spotify with one click. Only Spotify's level changes, not your system volume.
+- **Themes**: Dark, Light, Clear, Spotify green, or your Windows accent colour. Auto mode follows the Windows light / dark setting live.
 - **Looks native**: a translucent pill that blends into the taskbar and highlights on hover like the taskbar's own buttons.
 - **Stays out of the way**: hides automatically when a fullscreen game or video is in front, and comes back the moment the taskbar shows up (Start, tray, search).
 - **No setup**: no Spotify API keys, no login, and no Premium needed.
 - **Lightweight**: one small window with no taskbar button and no Alt+Tab entry. It never steals focus.
+
+### Volume
+
+<img src="docs/volume.png" width="358" alt="Volume slider above the widget">
+
+### Themes
+
+Right-click the widget → **Тема** ("Theme"). Your choice is remembered.
+
+<img src="docs/themes.png" width="520" alt="Dark, Light, Clear, Spotify and Windows accent themes">
 
 ## How it works
 
@@ -36,6 +48,9 @@ flowchart LR
     B -- "play / pause / skip / seek" --> W
     W -- "commands" --> S
 ```
+
+The media session doesn't carry volume, so the volume control drives Spotify's own slider in the Windows volume mixer
+(via [NAudio](https://github.com/naudio/NAudio) and the Core Audio session API).
 
 Spotify only reports its position now and then, so SpotifyBar fills in the gaps between updates to keep the ring moving smoothly.
 A window-event hook keeps the widget above the taskbar as soon as focus changes.
@@ -68,8 +83,11 @@ To start it with Windows, right-click the widget and check **Запускати 
 | Jump to a point in the track | Click on the progress ring (12 o'clock is the start) |
 | Seek ±5 seconds | Scroll the mouse wheel over the widget |
 | See elapsed / total time | Hover over the ring |
+| Change volume | Click the speaker and drag the slider, or scroll over the speaker |
+| Mute Spotify | Click the speaker icon inside the volume popup |
+| Change theme | Right-click → **Тема** |
 | Move the widget | Drag it anywhere. The position is remembered. |
-| Menu: autostart, reset position, exit | Right-click the widget |
+| Menu: theme, autostart, reset position, exit | Right-click the widget |
 
 The context menu and status text are in Ukrainian.
 
@@ -77,11 +95,13 @@ The context menu and status text are in Ukrainian.
 
 | File | What's inside |
 | --- | --- |
-| `MainWindow.xaml` | The pill layout: cover, progress ring, title, buttons |
-| `MainWindow.xaml.cs` | SMTC session handling, seeking, positioning, fullscreen detection, autostart |
-| `App.xaml` | Round icon button styles and single-instance guard |
+| `MainWindow.xaml` | The pill layout: cover, progress ring, title, buttons, volume popup, context menu |
+| `MainWindow.xaml.cs` | SMTC session handling, seeking, volume UI, positioning, fullscreen detection, autostart |
+| `SpotifyVolume.cs` | Finds Spotify's audio session in the Windows mixer and reads / sets its volume |
+| `Themes.cs` | Theme palettes, Windows light / dark and accent colour detection |
+| `App.xaml` | Theme brushes, round icon button styles, and the single-instance guard |
 
-Settings are stored in `%APPDATA%\SpotifyBar\position.txt` (widget position) and in the
+Settings are stored in `%APPDATA%\SpotifyBar\` (`position.txt` for the widget position, `theme.txt` for the theme) and in the
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key (autostart).
 
 ## License

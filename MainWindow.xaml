@@ -1,7 +1,7 @@
 <Window x:Class="SpotifyBar.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="SpotifyBar" Width="300" Height="48"
+        Title="SpotifyBar" Width="330" Height="48"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         ShowInTaskbar="False" Topmost="True" ResizeMode="NoResize"
         FontFamily="Segoe UI Variable Text, Segoe UI">
@@ -11,16 +11,25 @@
             MouseLeftButtonDown="Root_MouseLeftButtonDown" MouseWheel="Root_MouseWheel">
         <Border.Style>
             <Style TargetType="Border">
-                <Setter Property="Background" Value="#12FFFFFF"/>
+                <Setter Property="Background" Value="{DynamicResource PillBrush}"/>
                 <Style.Triggers>
                     <Trigger Property="IsMouseOver" Value="True">
-                        <Setter Property="Background" Value="#1CFFFFFF"/>
+                        <Setter Property="Background" Value="{DynamicResource PillHoverBrush}"/>
                     </Trigger>
                 </Style.Triggers>
             </Style>
         </Border.Style>
         <Border.ContextMenu>
             <ContextMenu>
+                <MenuItem x:Name="ThemeMenu" Header="Тема">
+                    <MenuItem Header="Автоматично (як у Windows)" Tag="Auto" IsCheckable="True" Click="Theme_Click"/>
+                    <MenuItem Header="Темна" Tag="Dark" IsCheckable="True" Click="Theme_Click"/>
+                    <MenuItem Header="Світла" Tag="Light" IsCheckable="True" Click="Theme_Click"/>
+                    <MenuItem Header="Без фону" Tag="Clear" IsCheckable="True" Click="Theme_Click"/>
+                    <MenuItem Header="Spotify" Tag="Spotify" IsCheckable="True" Click="Theme_Click"/>
+                    <MenuItem Header="Акцентний колір Windows" Tag="Accent" IsCheckable="True" Click="Theme_Click"/>
+                </MenuItem>
+                <Separator/>
                 <MenuItem x:Name="AutostartItem" Header="Запускати з Windows" IsCheckable="True" Click="Autostart_Click"/>
                 <MenuItem Header="Скинути позицію" Click="ResetPosition_Click"/>
                 <Separator/>
@@ -41,23 +50,49 @@
                 <Grid.ToolTip>
                     <ToolTip><TextBlock x:Name="TimeText"/></ToolTip>
                 </Grid.ToolTip>
-                <Ellipse Stroke="#26FFFFFF" StrokeThickness="2.5"/>
-                <Path x:Name="ProgressArc" Stroke="#1DB954" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                <Ellipse Stroke="{DynamicResource RingTrackBrush}" StrokeThickness="2.5"/>
+                <Path x:Name="ProgressArc" Stroke="{DynamicResource RingBrush}" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                 <Ellipse x:Name="Art" Width="22" Height="22" Fill="#1DB954"/>
                 <TextBlock x:Name="ArtGlyph" Text="&#xE8D6;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
                            Foreground="Black" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Grid>
 
             <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis">
-                <Run x:Name="TitleText" Text="Spotify не запущено" Foreground="White" FontWeight="SemiBold"/>
-                <Run x:Name="ArtistText" Text="" Foreground="#A8A8A8"/>
+                <Run x:Name="TitleText" Text="Spotify не запущено" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                <Run x:Name="ArtistText" Text="" Foreground="{DynamicResource SubTextBrush}"/>
             </TextBlock>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
                 <Button Style="{StaticResource IconButton}" Content="&#xE892;" Click="Prev_Click" ToolTip="Попередній трек"/>
                 <Button x:Name="PlayPauseButton" Style="{StaticResource PlayButton}" Content="&#xE768;" Click="PlayPause_Click" ToolTip="Пауза / відтворення"/>
                 <Button Style="{StaticResource IconButton}" Content="&#xE893;" Click="Next_Click" ToolTip="Наступний трек"/>
+                <Button x:Name="VolumeButton" Style="{StaticResource IconButton}" Content="&#xE995;"
+                        Click="VolumeButton_Click" MouseWheel="Volume_MouseWheel"
+                        MouseEnter="Volume_MouseEnter" MouseLeave="Volume_MouseLeave"/>
             </StackPanel>
+
+            <!-- Volume slider that pops up above the speaker button. -->
+            <Popup x:Name="VolumePopup" PlacementTarget="{Binding ElementName=VolumeButton}" Placement="Custom"
+                   AllowsTransparency="True" StaysOpen="True" PopupAnimation="Fade">
+                <Border x:Name="VolumePanel" Background="{DynamicResource PopupBrush}" BorderBrush="{DynamicResource PopupBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="4,4,12,4"
+                        MouseLeftButtonDown="VolumePanel_MouseLeftButtonDown"
+                        MouseWheel="Volume_MouseWheel" MouseEnter="Volume_MouseEnter" MouseLeave="Volume_MouseLeave">
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="MuteButton" Style="{StaticResource IconButton}" Content="&#xE995;" Click="Mute_Click" ToolTip="Вимкнути / увімкнути звук"/>
+                        <Grid x:Name="VolumeTrack" Width="110" Height="20" Margin="6,0,10,0" Background="Transparent" Cursor="Hand"
+                              MouseLeftButtonDown="VolumeTrack_MouseDown" MouseMove="VolumeTrack_MouseMove" MouseLeftButtonUp="VolumeTrack_MouseUp">
+                            <Border Height="4" CornerRadius="2" Background="{DynamicResource RingTrackBrush}" VerticalAlignment="Center"/>
+                            <Border x:Name="VolumeFill" Height="4" CornerRadius="2" Background="{DynamicResource RingBrush}"
+                                    HorizontalAlignment="Left" VerticalAlignment="Center" Width="0"/>
+                            <Ellipse x:Name="VolumeThumb" Width="12" Height="12" Fill="{DynamicResource TextBrush}"
+                                     HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        </Grid>
+                        <TextBlock x:Name="VolumeText" Width="28" TextAlignment="Right" VerticalAlignment="Center"
+                                   FontSize="12" Foreground="{DynamicResource TextBrush}"/>
+                    </StackPanel>
+                </Border>
+            </Popup>
         </Grid>
     </Border>
 </Window>

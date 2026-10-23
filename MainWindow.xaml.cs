@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -25,6 +27,9 @@ namespace SpotifyBar
 
         private readonly DispatcherTimer _uiTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
         private readonly DispatcherTimer _pollTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+        private readonly DispatcherTimer _popupCloseTimer = new() { Interval = TimeSpan.FromMilliseconds(600) };
+        private readonly SpotifyVolume _volume = new();
+        private bool _volumeDragging;
 
         private GlobalSystemMediaTransportControlsSessionManager? _manager;
         private GlobalSystemMediaTransportControlsSession? _session;
@@ -43,6 +48,18 @@ namespace SpotifyBar
         public MainWindow()
         {
             InitializeComponent();
+
+            // Centre the volume popup above the speaker button.
+            VolumePopup.CustomPopupPlacementCallback = (popup, target, _) => new[]
+            {
+                new CustomPopupPlacement(new Point((target.Width - popup.Width) / 2, -popup.Height - 8), PopupPrimaryAxis.Horizontal),
+            };
+            _popupCloseTimer.Tick += (_, _) =>
+            {
+                _popupCloseTimer.Stop();
+                if (!VolumeButton.IsMouseOver && !VolumePanel.IsMouseOver && !_volumeDragging)
+                    VolumePopup.IsOpen = false;
+            };
         }
 
         protected override async void OnSourceInitialized(EventArgs e)
@@ -56,6 +73,14 @@ namespace SpotifyBar
 
             PlaceWindow();
             AutostartItem.IsChecked = IsAutostartEnabled();
+
+            Themes.Apply(Themes.Load());
+            UpdateThemeChecks();
+            // Auto and accent themes follow Windows settings live.
+            SystemEvents.UserPreferenceChanged += (_, _) => Dispatcher.InvokeAsync(() =>
+            {
+                if (Themes.Current is Theme.Auto or Theme.Accent) Themes.Apply(Themes.Current);
+            });
 
             _uiTimer.Tick += (_, _) => { KeepOnTop(); UpdateProgress(); };
             _pollTimer.Tick += async (_, _) => await Poll();
@@ -203,6 +228,12 @@ namespace SpotifyBar
             _polling = true;
             try
             {
+                if (!_volumeDragging)
+                {
+                    _volume.Refresh();
+                    UpdateVolumeUi();
+                }
+
                 _session = _manager.GetSessions().FirstOrDefault(s =>
                     s.SourceAppUserModelId.Contains("Spotify", StringComparison.OrdinalIgnoreCase));
 
@@ -341,6 +372,109 @@ namespace SpotifyBar
             _positionStamp = DateTimeOffset.Now;
             UpdateProgress();
             try { await _session.TryChangePlaybackPositionAsync(target.Ticks); } catch { }
+        }
+
+        // ---------- Volume ----------
+
+        private void UpdateVolumeUi()
+        {
+            float? level = _volume.Level;
+            bool muted = _volume.Muted;
+            string glyph = level == null || muted || level < 0.005f ? ""
+                : level < 0.34f ? ""
+                : level < 0.67f ? ""
+                : "";
+            VolumeButton.Content = glyph;
+            MuteButton.Content = glyph;
+            VolumeButton.Opacity = level == null ? 0.45 : 1;
+
+            double shown = muted ? 0 : level ?? 0;
+            int pct = (int)Math.Round(shown * 100);
+            VolumeText.Text = pct.ToString(CultureInfo.InvariantCulture);
+            double w = VolumeTrack.Width;
+            VolumeFill.Width = w * shown;
+            VolumeThumb.Margin = new Thickness((w - VolumeThumb.Width) * shown, 0, 0, 0);
+            VolumeButton.ToolTip = VolumePopup.IsOpen ? null
+                : level == null ? "Гучність Spotify (з'явиться, коли Spotify почне грати)"
+                : $"Гучність Spotify: {pct}%";
+        }
+
+        private void SetVolume(double level)
+        {
+            if (!_volume.IsAvailable) return;
+            _volume.Level = (float)Math.Clamp(level, 0, 1);
+            UpdateVolumeUi();
+        }
+
+        private void VolumeButton_Click(object sender, RoutedEventArgs e)
+        {
+            _volume.Refresh();
+            VolumePopup.IsOpen = !VolumePopup.IsOpen;
+            UpdateVolumeUi();
+        }
+
+        private void Mute_Click(object sender, RoutedEventArgs e)
+        {
+            _volume.Muted = !_volume.Muted;
+            UpdateVolumeUi();
+        }
+
+        private void Volume_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            e.Handled = true; // the wheel over the speaker changes volume, not position
+            if (_volume.Level is not float level) return;
+            double step = e.Delta > 0 ? 0.05 : -0.05;
+            SetVolume(Math.Round((level + step) * 20) / 20);
+        }
+
+        private void VolumeTrack_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            e.Handled = true;
+            _volumeDragging = VolumeTrack.CaptureMouse();
+            SetVolumeFromPointer(e);
+        }
+
+        private void VolumeTrack_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_volumeDragging) SetVolumeFromPointer(e);
+        }
+
+        private void VolumeTrack_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            _volumeDragging = false;
+            VolumeTrack.ReleaseMouseCapture();
+            if (!VolumePanel.IsMouseOver) _popupCloseTimer.Start();
+        }
+
+        private void SetVolumeFromPointer(MouseEventArgs e)
+        {
+            double half = VolumeThumb.Width / 2;
+            SetVolume((e.GetPosition(VolumeTrack).X - half) / (VolumeTrack.Width - 2 * half));
+        }
+
+        private void VolumePanel_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) => e.Handled = true; // no window drag from the popup
+
+        private void Volume_MouseEnter(object sender, MouseEventArgs e) => _popupCloseTimer.Stop();
+
+        private void Volume_MouseLeave(object sender, MouseEventArgs e)
+        {
+            if (VolumePopup.IsOpen) _popupCloseTimer.Start();
+        }
+
+        // ---------- Themes ----------
+
+        private void Theme_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuItem { Tag: string tag } || !Enum.TryParse(tag, out Theme theme)) return;
+            Themes.Apply(theme);
+            Themes.Save(theme);
+            UpdateThemeChecks();
+        }
+
+        private void UpdateThemeChecks()
+        {
+            foreach (var item in ThemeMenu.Items.OfType<MenuItem>())
+                item.IsChecked = (string)item.Tag == Themes.Current.ToString();
         }
 
         // ---------- Input ----------
