@@ -29,6 +29,7 @@
                     <MenuItem Header="Spotify" Tag="Spotify" IsCheckable="True" Click="Theme_Click"/>
                     <MenuItem Header="Акцентний колір Windows" Tag="Accent" IsCheckable="True" Click="Theme_Click"/>
                 </MenuItem>
+                <MenuItem x:Name="ConnectItem" Header="Підключити акаунт Spotify…" Click="Connect_Click"/>
                 <Separator/>
                 <MenuItem x:Name="AutostartItem" Header="Запускати з Windows" IsCheckable="True" Click="Autostart_Click"/>
                 <MenuItem Header="Скинути позицію" Click="ResetPosition_Click"/>
@@ -58,8 +59,10 @@
             </Grid>
 
             <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis">
-                <Run x:Name="TitleText" Text="Spotify не запущено" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
-                <Run x:Name="ArtistText" Text="" Foreground="{DynamicResource SubTextBrush}"/>
+                <Run x:Name="TitleText" Text="Spotify не запущено" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"
+                     Cursor="Hand" MouseEnter="Link_MouseEnter" MouseLeave="Link_MouseLeave"/>
+                <Run x:Name="ArtistText" Text="" Foreground="{DynamicResource SubTextBrush}"
+                     Cursor="Hand" MouseEnter="Link_MouseEnter" MouseLeave="Link_MouseLeave"/>
             </TextBlock>
 
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">

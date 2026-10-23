@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -28,8 +29,14 @@ namespace SpotifyBar
         private readonly DispatcherTimer _uiTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
         private readonly DispatcherTimer _pollTimer = new() { Interval = TimeSpan.FromSeconds(1) };
         private readonly DispatcherTimer _popupCloseTimer = new() { Interval = TimeSpan.FromMilliseconds(600) };
-        private readonly SpotifyVolume _volume = new();
-        private bool _volumeDragging;
+        private readonly SpotifyApi _api = new();
+        private PlayerState? _player;
+        private int? _apiVolume;
+        private int _volumeBeforeMute = 50;
+        private int? _pendingVolume;
+        private bool _sendingVolume, _volumeDragging;
+        private DateTime _volumeHoldUntil, _lastApiPoll;
+        private string? _title, _artist;
 
         private GlobalSystemMediaTransportControlsSessionManager? _manager;
         private GlobalSystemMediaTransportControlsSession? _session;
@@ -76,6 +83,8 @@ namespace SpotifyBar
 
             Themes.Apply(Themes.Load());
             UpdateThemeChecks();
+            UpdateConnectItem();
+            UpdateVolumeUi();
             // Auto and accent themes follow Windows settings live.
             SystemEvents.UserPreferenceChanged += (_, _) => Dispatcher.InvokeAsync(() =>
             {
@@ -228,12 +237,6 @@ namespace SpotifyBar
             _polling = true;
             try
             {
-                if (!_volumeDragging)
-                {
-                    _volume.Refresh();
-                    UpdateVolumeUi();
-                }
-
                 _session = _manager.GetSessions().FirstOrDefault(s =>
                     s.SourceAppUserModelId.Contains("Spotify", StringComparison.OrdinalIgnoreCase));
 
@@ -254,15 +257,22 @@ namespace SpotifyBar
 
                 var props = await _session.TryGetMediaPropertiesAsync();
                 string key = props.Title + "\u0001" + props.Artist;
-                if (key != _trackKey)
+                bool trackChanged = key != _trackKey;
+                if (trackChanged)
                 {
                     _trackKey = key;
+                    _title = props.Title;
+                    _artist = props.Artist;
                     TitleText.Text = string.IsNullOrEmpty(props.Title) ? "Spotify" : props.Title;
                     ArtistText.Text = string.IsNullOrEmpty(props.Artist) ? "" : "· " + props.Artist;
                     Root.ToolTip = string.IsNullOrEmpty(props.Artist) ? props.Title : $"{props.Title} — {props.Artist}";
                     await LoadThumbnail(props);
                 }
                 UpdateProgress();
+
+                // The Web API is only needed for volume and links, so ask it less often.
+                if (_api.IsConnected && (trackChanged || DateTime.UtcNow - _lastApiPoll > TimeSpan.FromSeconds(4)))
+                    await RefreshPlayer();
             }
             catch
             {
@@ -301,9 +311,29 @@ namespace SpotifyBar
             catch { }
         }
 
+        private async System.Threading.Tasks.Task RefreshPlayer()
+        {
+            if (_api.IsConnected)
+            {
+                _lastApiPoll = DateTime.UtcNow;
+                var player = await _api.GetPlayerAsync();
+                _player = player;
+                if (DateTime.UtcNow > _volumeHoldUntil && !_volumeDragging) _apiVolume = player?.Volume;
+                if (_apiVolume > 0) _volumeBeforeMute = _apiVolume.Value;
+            }
+            if (!_api.IsConnected) // also covers a token Spotify just revoked
+            {
+                _player = null;
+                _apiVolume = null;
+            }
+            UpdateConnectItem();
+            UpdateVolumeUi();
+        }
+
         private void ShowIdle()
         {
             _trackKey = null;
+            _title = _artist = null;
             _playing = false;
             _duration = TimeSpan.Zero;
             TitleText.Text = "Spotify не запущено";
@@ -374,57 +404,86 @@ namespace SpotifyBar
             try { await _session.TryChangePlaybackPositionAsync(target.Ticks); } catch { }
         }
 
-        // ---------- Volume ----------
+        // ---------- Volume (Spotify's own, via the Web API) ----------
 
         private void UpdateVolumeUi()
         {
-            float? level = _volume.Level;
-            bool muted = _volume.Muted;
-            string glyph = level == null || muted || level < 0.005f ? ""
-                : level < 0.34f ? ""
-                : level < 0.67f ? ""
-                : "";
+            int? level = _api.IsConnected ? _apiVolume : null;
+            string glyph = level == null || level == 0 ? "\uE74F"
+                : level < 34 ? "\uE993"
+                : level < 67 ? "\uE994"
+                : "\uE995";
             VolumeButton.Content = glyph;
             MuteButton.Content = glyph;
             VolumeButton.Opacity = level == null ? 0.45 : 1;
 
-            double shown = muted ? 0 : level ?? 0;
-            int pct = (int)Math.Round(shown * 100);
-            VolumeText.Text = pct.ToString(CultureInfo.InvariantCulture);
+            double shown = (level ?? 0) / 100.0;
+            VolumeText.Text = (level ?? 0).ToString(CultureInfo.InvariantCulture);
             double w = VolumeTrack.Width;
             VolumeFill.Width = w * shown;
             VolumeThumb.Margin = new Thickness((w - VolumeThumb.Width) * shown, 0, 0, 0);
             VolumeButton.ToolTip = VolumePopup.IsOpen ? null
+                : !_api.IsConnected ? "Гучність Spotify: натисніть, щоб підключити акаунт"
                 : level == null ? "Гучність Spotify (з'явиться, коли Spotify почне грати)"
-                : $"Гучність Spotify: {pct}%";
+                : $"Гучність Spotify: {level}%";
         }
 
         private void SetVolume(double level)
         {
-            if (!_volume.IsAvailable) return;
-            _volume.Level = (float)Math.Clamp(level, 0, 1);
+            if (!_api.IsConnected || _apiVolume == null) return;
+            int pct = (int)Math.Round(Math.Clamp(level, 0, 1) * 100);
+            if (pct > 0) _volumeBeforeMute = pct;
+            _apiVolume = pct;
+            _volumeHoldUntil = DateTime.UtcNow.AddSeconds(2); // don't let a stale poll undo the change
             UpdateVolumeUi();
+            SendVolume(pct);
         }
 
-        private void VolumeButton_Click(object sender, RoutedEventArgs e)
+        // Coalesces slider drags: at most one request in flight, and the last value always wins.
+        private async void SendVolume(int pct)
         {
-            _volume.Refresh();
+            _pendingVolume = pct;
+            if (_sendingVolume) return;
+            _sendingVolume = true;
+            try
+            {
+                while (_pendingVolume is int next)
+                {
+                    _pendingVolume = null;
+                    await _api.SetVolumeAsync(next);
+                    _volumeHoldUntil = DateTime.UtcNow.AddSeconds(1.5);
+                }
+            }
+            finally
+            {
+                _sendingVolume = false;
+            }
+        }
+
+        private async void VolumeButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (!_api.IsConnected)
+            {
+                ShowConnect();
+                return;
+            }
             VolumePopup.IsOpen = !VolumePopup.IsOpen;
             UpdateVolumeUi();
+            if (VolumePopup.IsOpen) await RefreshPlayer();
         }
 
         private void Mute_Click(object sender, RoutedEventArgs e)
         {
-            _volume.Muted = !_volume.Muted;
-            UpdateVolumeUi();
+            if (_apiVolume is not int level) return;
+            SetVolume(level > 0 ? 0 : _volumeBeforeMute / 100.0);
         }
 
         private void Volume_MouseWheel(object sender, MouseWheelEventArgs e)
         {
             e.Handled = true; // the wheel over the speaker changes volume, not position
-            if (_volume.Level is not float level) return;
-            double step = e.Delta > 0 ? 0.05 : -0.05;
-            SetVolume(Math.Round((level + step) * 20) / 20);
+            if (_apiVolume is not int level) return;
+            int step = e.Delta > 0 ? 5 : -5;
+            SetVolume(Math.Round((level + step) / 5.0) * 5 / 100.0);
         }
 
         private void VolumeTrack_MouseDown(object sender, MouseButtonEventArgs e)
@@ -459,6 +518,84 @@ namespace SpotifyBar
         private void Volume_MouseLeave(object sender, MouseEventArgs e)
         {
             if (VolumePopup.IsOpen) _popupCloseTimer.Start();
+        }
+
+        // ---------- Spotify account and links ----------
+
+        private async void ShowConnect()
+        {
+            VolumePopup.IsOpen = false;
+            var dialog = new ConnectWindow(_api);
+            if (dialog.ShowDialog() == true) await RefreshPlayer();
+            UpdateConnectItem();
+        }
+
+        private void Connect_Click(object sender, RoutedEventArgs e)
+        {
+            if (_api.IsConnected)
+            {
+                _api.Disconnect();
+                _player = null;
+                _apiVolume = null;
+                UpdateConnectItem();
+                UpdateVolumeUi();
+            }
+            else
+            {
+                ShowConnect();
+            }
+        }
+
+        private void UpdateConnectItem() =>
+            ConnectItem.Header = _api.IsConnected ? "Відключити акаунт Spotify" : "Підключити акаунт Spotify…";
+
+        private async void OpenTrack()
+        {
+            if (_title == null)
+            {
+                SpotifyApi.Open("spotify:"); // nothing playing: just bring Spotify up
+                return;
+            }
+            await RefreshPlayer(); // make sure the IDs belong to the track that's showing
+            if (_player?.Item is SpotifyLink item) SpotifyApi.Open(item.Uri);
+            else SpotifyApi.Open("spotify:search:" + Uri.EscapeDataString($"{_title} {_artist}".Trim()));
+        }
+
+        private async void OpenArtist()
+        {
+            if (string.IsNullOrEmpty(_artist)) return;
+            await RefreshPlayer();
+            var artists = _player?.Artists ?? Array.Empty<SpotifyLink>();
+            if (artists.Count == 1)
+            {
+                SpotifyApi.Open(artists[0].Uri);
+            }
+            else if (artists.Count > 1)
+            {
+                // Several artists on one track: let the user pick which one to open.
+                var menu = new ContextMenu { PlacementTarget = Root, Placement = PlacementMode.Top };
+                foreach (var artist in artists)
+                {
+                    var item = new MenuItem { Header = artist.Name };
+                    item.Click += (_, _) => SpotifyApi.Open(artist.Uri);
+                    menu.Items.Add(item);
+                }
+                menu.IsOpen = true;
+            }
+            else
+            {
+                SpotifyApi.Open("spotify:search:" + Uri.EscapeDataString(_artist));
+            }
+        }
+
+        private void Link_MouseEnter(object sender, MouseEventArgs e)
+        {
+            if (sender is Run run && _title != null) run.TextDecorations = TextDecorations.Underline;
+        }
+
+        private void Link_MouseLeave(object sender, MouseEventArgs e)
+        {
+            if (sender is Run run) run.TextDecorations = null;
         }
 
         // ---------- Themes ----------
@@ -516,8 +653,14 @@ namespace SpotifyBar
 
         private void Root_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            // A press that doesn't move the window is a click: on the title or artist it opens them in Spotify.
+            object source = e.OriginalSource;
+            double left = Left, top = Top;
             try { DragMove(); } catch { }
-            SavePosition();
+
+            if (Math.Abs(Left - left) >= 1 || Math.Abs(Top - top) >= 1) SavePosition();
+            else if (source == TitleText) OpenTrack();
+            else if (source == ArtistText) OpenArtist();
         }
 
         private void ResetPosition_Click(object sender, RoutedEventArgs e)

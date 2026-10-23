@@ -18,11 +18,12 @@ See what's playing, pause, skip, scrub through the track, and change Spotify's v
 - **Progress ring**: playback progress is drawn as a ring around the cover.
 - **Playback controls**: previous, play / pause, and next.
 - **Seeking**: click anywhere on the ring to jump to that point, or scroll the mouse wheel over the widget to move ±5 seconds.
-- **Volume**: a speaker button opens a slider for Spotify's volume. You can also scroll over the speaker to change it in 5% steps, or mute Spotify with one click. Only Spotify's level changes, not your system volume.
+- **Spotify's own volume**: a speaker button opens a slider bound to the volume inside Spotify itself (the same slider you see in the app). Scroll over the speaker for 5% steps, or mute with one click.
+- **Jump into Spotify**: click the track title to open it in the Spotify app, or click the artist to open their page. On tracks with several artists you pick which one.
 - **Themes**: Dark, Light, Clear, Spotify green, or your Windows accent colour. Auto mode follows the Windows light / dark setting live.
 - **Looks native**: a translucent pill that blends into the taskbar and highlights on hover like the taskbar's own buttons.
 - **Stays out of the way**: hides automatically when a fullscreen game or video is in front, and comes back the moment the taskbar shows up (Start, tray, search).
-- **No setup**: no Spotify API keys, no login, and no Premium needed.
+- **Works without an account**: playback info and controls need no login. Connecting your Spotify account (one time, see below) adds volume and exact track / artist links.
 - **Lightweight**: one small window with no taskbar button and no Alt+Tab entry. It never steals focus.
 
 ### Volume
@@ -49,8 +50,10 @@ flowchart LR
     W -- "commands" --> S
 ```
 
-The media session doesn't carry volume, so the volume control drives Spotify's own slider in the Windows volume mixer
-(via [NAudio](https://github.com/naudio/NAudio) and the Core Audio session API).
+The media session carries neither Spotify's volume nor track IDs, so those two features use the official
+[Spotify Web API](https://developer.spotify.com/documentation/web-api) (`GET /me/player`, `PUT /me/player/volume`).
+Sign-in uses Authorization Code with PKCE through a one-off loopback callback on `127.0.0.1:8888`, so no client secret is involved.
+The refresh token is stored encrypted for your Windows user with DPAPI. Track and artist links open through `spotify:` URIs, which the desktop app handles.
 
 Spotify only reports its position now and then, so SpotifyBar fills in the gaps between updates to keep the ring moving smoothly.
 A window-event hook keeps the widget above the taskbar as soon as focus changes.
@@ -60,6 +63,7 @@ A window-event hook keeps the widget above the taskbar as soon as focus changes.
 - Windows 10 version 2004 or later, or Windows 11
 - [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)
 - The Spotify desktop app
+- For volume control: Spotify Premium (Spotify only allows changing volume through the API on Premium)
 
 ## Install
 
@@ -74,6 +78,18 @@ dotnet publish -c Release -r win-x64 --no-self-contained -p:PublishSingleFile=tr
 
 To start it with Windows, right-click the widget and check **Запускати з Windows** ("Start with Windows").
 
+### Connect your Spotify account (for volume and links)
+
+Spotify requires every app that uses its Web API to have its own Client ID, so you create one for yourself. It takes about two minutes:
+
+1. Open the [Spotify developer dashboard](https://developer.spotify.com/dashboard) and click **Create app**.
+2. Use any name and description. Under **Redirect URIs** add `http://127.0.0.1:8888/callback`, and under **Which API/SDKs** tick **Web API**. Save.
+3. Copy the **Client ID** from the app's settings.
+4. Right-click the widget → **Підключити акаунт Spotify…** ("Connect Spotify account"), paste the Client ID, and click **Увійти в Spotify** ("Sign in").
+5. Approve access in the browser tab that opens. That's it.
+
+Without a connected account, clicking the title or artist falls back to a Spotify search.
+
 ## Usage
 
 | Action | How |
@@ -83,11 +99,13 @@ To start it with Windows, right-click the widget and check **Запускати 
 | Jump to a point in the track | Click on the progress ring (12 o'clock is the start) |
 | Seek ±5 seconds | Scroll the mouse wheel over the widget |
 | See elapsed / total time | Hover over the ring |
+| Open the track in Spotify | Click the title |
+| Open the artist in Spotify | Click the artist name |
 | Change volume | Click the speaker and drag the slider, or scroll over the speaker |
 | Mute Spotify | Click the speaker icon inside the volume popup |
 | Change theme | Right-click → **Тема** |
 | Move the widget | Drag it anywhere. The position is remembered. |
-| Menu: theme, autostart, reset position, exit | Right-click the widget |
+| Menu: theme, Spotify account, autostart, reset position, exit | Right-click the widget |
 
 The context menu and status text are in Ukrainian.
 
@@ -96,12 +114,13 @@ The context menu and status text are in Ukrainian.
 | File | What's inside |
 | --- | --- |
 | `MainWindow.xaml` | The pill layout: cover, progress ring, title, buttons, volume popup, context menu |
-| `MainWindow.xaml.cs` | SMTC session handling, seeking, volume UI, positioning, fullscreen detection, autostart |
-| `SpotifyVolume.cs` | Finds Spotify's audio session in the Windows mixer and reads / sets its volume |
+| `MainWindow.xaml.cs` | SMTC session handling, seeking, volume UI, track / artist links, positioning, fullscreen detection, autostart |
+| `SpotifyApi.cs` | Spotify Web API client: PKCE sign-in, token refresh, player state, volume |
+| `ConnectWindow.xaml` | The one-time "connect your Spotify account" dialog |
 | `Themes.cs` | Theme palettes, Windows light / dark and accent colour detection |
 | `App.xaml` | Theme brushes, round icon button styles, and the single-instance guard |
 
-Settings are stored in `%APPDATA%\SpotifyBar\` (`position.txt` for the widget position, `theme.txt` for the theme) and in the
+Settings are stored in `%APPDATA%\SpotifyBar\` (`position.txt` for the widget position, `theme.txt` for the theme, `spotify.dat` for the encrypted Spotify sign-in) and in the
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key (autostart).
 
 ## License
