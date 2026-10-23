@@ -8,7 +8,9 @@
     <!-- Only the pill is hit-testable; the rest of the window is fully transparent. -->
     <Border x:Name="Root" Height="36" CornerRadius="18" VerticalAlignment="Center"
             Padding="3,0,4,0"
-            MouseLeftButtonDown="Root_MouseLeftButtonDown" MouseWheel="Root_MouseWheel">
+            MouseLeftButtonDown="Root_MouseLeftButtonDown" MouseMove="Root_MouseMove"
+            MouseLeftButtonUp="Root_MouseLeftButtonUp" LostMouseCapture="Root_LostMouseCapture"
+            MouseEnter="Root_HoverChanged" MouseLeave="Root_HoverChanged" MouseWheel="Root_MouseWheel">
         <Border.Style>
             <Style TargetType="Border">
                 <Setter Property="Background" Value="{DynamicResource PillBrush}"/>
@@ -29,6 +31,12 @@
                     <MenuItem Header="Spotify" Tag="Spotify" IsCheckable="True" Click="Theme_Click"/>
                     <MenuItem Header="Акцентний колір Windows" Tag="Accent" IsCheckable="True" Click="Theme_Click"/>
                 </MenuItem>
+                <MenuItem x:Name="StyleMenu" Header="Стиль">
+                    <MenuItem Header="Пігулка" Tag="Pill" IsCheckable="True" Click="Style_Click"/>
+                    <MenuItem Header="Нативний" Tag="Native" IsCheckable="True" Click="Style_Click"/>
+                    <MenuItem Header="Мінімал (кнопки при наведенні)" Tag="Minimal" IsCheckable="True" Click="Style_Click"/>
+                    <MenuItem Header="Прогрес фоном" Tag="ProgressFill" IsCheckable="True" Click="Style_Click"/>
+                </MenuItem>
                 <MenuItem x:Name="ConnectItem" Header="Підключити акаунт Spotify…" Click="Connect_Click"/>
                 <Separator/>
                 <MenuItem x:Name="AutostartItem" Header="Запускати з Windows" IsCheckable="True" Click="Autostart_Click"/>
@@ -44,6 +52,10 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
+            <!-- "Progress fill" style: the whole pill fills up as the track plays. -->
+            <Border x:Name="ProgressBackground" Grid.ColumnSpan="3" Margin="-3,0,-4,0" CornerRadius="6"
+                    IsHitTestVisible="False" Visibility="Collapsed"/>
+
             <!-- Round cover with the playback progress drawn as a ring around it; click the ring to seek. -->
             <Grid x:Name="Ring" Grid.Column="0" Width="30" Height="30" Margin="0,0,8,0"
                   Background="Transparent" Cursor="Hand"
@@ -58,14 +70,33 @@
                            Foreground="Black" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Grid>
 
-            <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis">
+            <!-- Square cover for the native and progress-fill styles; hover shows the time. -->
+            <Border x:Name="SquareArt" Grid.Column="0" Width="28" Height="28" CornerRadius="4" Margin="3,0,8,0"
+                    Background="#1DB954" Visibility="Collapsed">
+                <TextBlock x:Name="SquareGlyph" Text="&#xE8D6;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                           Foreground="Black" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+
+            <!-- Minimal style: just a note icon. -->
+            <TextBlock x:Name="MinimalIcon" Grid.Column="0" Text="&#xE8D6;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                       Foreground="{DynamicResource RingBrush}" FontSize="15" Margin="9,0,8,0" VerticalAlignment="Center"
+                       Visibility="Collapsed"/>
+
+            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+            <TextBlock x:Name="TrackLabel" FontSize="12" TextTrimming="CharacterEllipsis">
                 <Run x:Name="TitleText" Text="Spotify не запущено" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"
                      Cursor="Hand" MouseEnter="Link_MouseEnter" MouseLeave="Link_MouseLeave"/>
                 <Run x:Name="ArtistText" Text="" Foreground="{DynamicResource SubTextBrush}"
                      Cursor="Hand" MouseEnter="Link_MouseEnter" MouseLeave="Link_MouseLeave"/>
             </TextBlock>
+            <!-- Native style: thin progress bar under the text; click to seek. -->
+            <Grid x:Name="LinearHit" Height="7" Margin="0,1,0,0" Background="Transparent" Cursor="Hand"
+                  Visibility="Collapsed" MouseLeftButtonDown="LinearHit_MouseLeftButtonDown">
+                <Border x:Name="LinearBar" Height="3" CornerRadius="1.5" VerticalAlignment="Center"/>
+            </Grid>
+            </StackPanel>
 
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+            <StackPanel x:Name="ControlsPanel" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
                 <Button Style="{StaticResource IconButton}" Content="&#xE892;" Click="Prev_Click" ToolTip="Попередній трек"/>
                 <Button x:Name="PlayPauseButton" Style="{StaticResource PlayButton}" Content="&#xE768;" Click="PlayPause_Click" ToolTip="Пауза / відтворення"/>
                 <Button Style="{StaticResource IconButton}" Content="&#xE893;" Click="Next_Click" ToolTip="Наступний трек"/>
@@ -76,7 +107,7 @@
 
             <!-- Volume slider that pops up above the speaker button. -->
             <Popup x:Name="VolumePopup" PlacementTarget="{Binding ElementName=VolumeButton}" Placement="Custom"
-                   AllowsTransparency="True" StaysOpen="True" PopupAnimation="Fade">
+                   AllowsTransparency="True" StaysOpen="True" PopupAnimation="Fade" Closed="VolumePopup_Closed">
                 <Border x:Name="VolumePanel" Background="{DynamicResource PopupBrush}" BorderBrush="{DynamicResource PopupBorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="4,4,12,4"
                         MouseLeftButtonDown="VolumePanel_MouseLeftButtonDown"

@@ -37,6 +37,14 @@ namespace SpotifyBar
         private bool _sendingVolume, _volumeDragging;
         private DateTime _volumeHoldUntil, _lastApiPoll;
         private string? _title, _artist;
+        private WidgetStyle _style = WidgetStyle.Pill;
+        private readonly LineBreak _lineBreak = new();
+
+        // Horizontal drag along the taskbar (DragMove would let it leave the bar).
+        private double? _dragStartX;
+        private double _dragStartLeft;
+        private bool _dragging;
+        private object? _pressSource;
 
         private GlobalSystemMediaTransportControlsSessionManager? _manager;
         private GlobalSystemMediaTransportControlsSession? _session;
@@ -83,6 +91,7 @@ namespace SpotifyBar
 
             Themes.Apply(Themes.Load());
             UpdateThemeChecks();
+            ApplyStyle(Styles.Load());
             UpdateConnectItem();
             UpdateVolumeUi();
             // Auto and accent themes follow Windows settings live.
@@ -110,39 +119,38 @@ namespace SpotifyBar
 
         private void PlaceWindow()
         {
-            double screenW = SystemParameters.PrimaryScreenWidth;
             double screenH = SystemParameters.PrimaryScreenHeight;
             double taskbarH = screenH - SystemParameters.WorkArea.Bottom;
             Height = taskbarH >= 32 ? taskbarH : 48;
-
-            if (TryLoadPosition(out double left, out double top))
-            {
-                Left = left;
-                Top = top;
-                return;
-            }
-            // Default: on the taskbar, to the left of the system tray.
-            Left = screenW - Width - 330;
             Top = screenH - Height;
+            // Default: just left of the tray's "show hidden icons" arrow.
+            Left = ClampLeft(TryLoadLeft() ?? TrayLeft() - Width - 8);
         }
 
-        private bool TryLoadPosition(out double left, out double top)
+        /// <summary>Left edge of the tray area (arrow, icons, clock) in DIPs.</summary>
+        private double TrayLeft()
         {
-            left = top = 0;
+            double screenW = SystemParameters.PrimaryScreenWidth;
+            IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
+            IntPtr tray = taskbar == IntPtr.Zero ? IntPtr.Zero : FindWindowEx(taskbar, IntPtr.Zero, "TrayNotifyWnd", null);
+            if (tray == IntPtr.Zero || !GetWindowRect(tray, out RECT r) || r.Left <= 0) return screenW - 330;
+            return r.Left / VisualTreeHelper.GetDpi(this).DpiScaleX;
+        }
+
+        private double ClampLeft(double left) =>
+            Math.Clamp(left, 0, Math.Max(0, TrayLeft() - Width - 4));
+
+        private double? TryLoadLeft()
+        {
             try
             {
-                var parts = File.ReadAllText(_posFile).Split(';');
-                return parts.Length == 2
-                    && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out left)
-                    && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out top)
-                    && left > SystemParameters.VirtualScreenLeft - Width / 2
-                    && left < SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - Width / 2
-                    && top > SystemParameters.VirtualScreenTop - Height / 2
-                    && top < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - Height / 2;
+                // File format is "left;top"; only left matters now that the widget always sits on the taskbar.
+                string first = File.ReadAllText(_posFile).Split(';')[0];
+                return double.TryParse(first, NumberStyles.Float, CultureInfo.InvariantCulture, out double left) ? left : null;
             }
             catch
             {
-                return false;
+                return null;
             }
         }
 
@@ -264,7 +272,7 @@ namespace SpotifyBar
                     _title = props.Title;
                     _artist = props.Artist;
                     TitleText.Text = string.IsNullOrEmpty(props.Title) ? "Spotify" : props.Title;
-                    ArtistText.Text = string.IsNullOrEmpty(props.Artist) ? "" : "· " + props.Artist;
+                    UpdateArtistText();
                     Root.ToolTip = string.IsNullOrEmpty(props.Artist) ? props.Title : $"{props.Title} — {props.Artist}";
                     await LoadThumbnail(props);
                 }
@@ -286,8 +294,7 @@ namespace SpotifyBar
 
         private async System.Threading.Tasks.Task LoadThumbnail(GlobalSystemMediaTransportControlsSessionMediaProperties props)
         {
-            Art.Fill = new SolidColorBrush(Color.FromRgb(0x1D, 0xB9, 0x54));
-            ArtGlyph.Visibility = Visibility.Visible;
+            SetArt(null);
             if (props.Thumbnail == null) return;
             try
             {
@@ -305,8 +312,7 @@ namespace SpotifyBar
                 bmp.EndInit();
                 bmp.Freeze();
 
-                Art.Fill = new ImageBrush(bmp) { Stretch = Stretch.UniformToFill };
-                ArtGlyph.Visibility = Visibility.Collapsed;
+                SetArt(new ImageBrush(bmp) { Stretch = Stretch.UniformToFill });
             }
             catch { }
         }
@@ -337,11 +343,10 @@ namespace SpotifyBar
             _playing = false;
             _duration = TimeSpan.Zero;
             TitleText.Text = "Spotify не запущено";
-            ArtistText.Text = "";
+            UpdateArtistText();
             Root.ToolTip = null;
             PlayPauseButton.Content = "";
-            Art.Fill = new SolidColorBrush(Color.FromRgb(0x1D, 0xB9, 0x54));
-            ArtGlyph.Visibility = Visibility.Visible;
+            SetArt(null);
             UpdateProgress();
         }
 
@@ -359,13 +364,48 @@ namespace SpotifyBar
         {
             if (_duration <= TimeSpan.Zero)
             {
-                ProgressArc.Data = null;
+                SetProgressVisual(0);
                 TimeText.Text = "";
+                SquareArt.ToolTip = null;
                 return;
             }
             var pos = CurrentPosition();
             TimeText.Text = $"{FormatTime(pos)} / {FormatTime(_duration)}";
-            ProgressArc.Data = BuildArc(pos.TotalMilliseconds / _duration.TotalMilliseconds);
+            SquareArt.ToolTip = TimeText.Text;
+            SetProgressVisual(pos.TotalMilliseconds / _duration.TotalMilliseconds);
+        }
+
+        private void SetProgressVisual(double frac)
+        {
+            ProgressArc.Data = BuildArc(frac);
+            Color ring = ((SolidColorBrush)FindResource("RingBrush")).Color;
+            Color track = ((SolidColorBrush)FindResource("RingTrackBrush")).Color;
+            if (_style == WidgetStyle.Native)
+                LinearBar.Background = HardStop(ring, track, frac);
+            if (_style == WidgetStyle.ProgressFill)
+                ProgressBackground.Background = HardStop(Color.FromArgb(0x30, ring.R, ring.G, ring.B), Colors.Transparent, frac);
+        }
+
+        // Left-to-right fill with a sharp edge at frac; needs no layout pass, unlike resizing an element.
+        private static Brush HardStop(Color filled, Color rest, double frac)
+        {
+            var brush = new LinearGradientBrush { StartPoint = new Point(0, 0.5), EndPoint = new Point(1, 0.5) };
+            brush.GradientStops.Add(new GradientStop(filled, 0));
+            brush.GradientStops.Add(new GradientStop(filled, frac));
+            brush.GradientStops.Add(new GradientStop(rest, frac));
+            brush.GradientStops.Add(new GradientStop(rest, 1));
+            brush.Freeze();
+            return brush;
+        }
+
+        private void SetArt(Brush? cover)
+        {
+            var fallback = new SolidColorBrush(Color.FromRgb(0x1D, 0xB9, 0x54));
+            Art.Fill = cover ?? fallback;
+            SquareArt.Background = cover ?? fallback;
+            var glyph = cover == null ? Visibility.Visible : Visibility.Collapsed;
+            ArtGlyph.Visibility = glyph;
+            SquareGlyph.Visibility = glyph;
         }
 
         private static string FormatTime(TimeSpan t) =>
@@ -598,6 +638,71 @@ namespace SpotifyBar
             if (sender is Run run) run.TextDecorations = null;
         }
 
+        // ---------- Styles ----------
+
+        private void ApplyStyle(WidgetStyle style)
+        {
+            _style = style;
+            bool pill = style == WidgetStyle.Pill, native = style == WidgetStyle.Native;
+            bool minimal = style == WidgetStyle.Minimal, fill = style == WidgetStyle.ProgressFill;
+            bool twoLines = native || fill;
+
+            Root.CornerRadius = new CornerRadius(pill || minimal ? 18 : 6);
+            Root.Height = twoLines ? 40 : 36;
+            // Minimal hugs its content from the right so it grows leftwards when the buttons appear.
+            Root.HorizontalAlignment = minimal ? HorizontalAlignment.Right : HorizontalAlignment.Stretch;
+            ProgressBackground.CornerRadius = Root.CornerRadius;
+
+            Ring.Visibility = pill ? Visibility.Visible : Visibility.Collapsed;
+            SquareArt.Visibility = twoLines ? Visibility.Visible : Visibility.Collapsed;
+            MinimalIcon.Visibility = minimal ? Visibility.Visible : Visibility.Collapsed;
+            LinearHit.Visibility = native ? Visibility.Visible : Visibility.Collapsed;
+            ProgressBackground.Visibility = fill ? Visibility.Visible : Visibility.Collapsed;
+
+            // Two-line styles put the artist under the title.
+            TrackLabel.Inlines.Remove(_lineBreak);
+            if (twoLines) TrackLabel.Inlines.InsertBefore(ArtistText, _lineBreak);
+            ArtistText.FontSize = twoLines ? 11 : 12;
+            TrackLabel.MaxWidth = minimal ? 190 : double.PositiveInfinity;
+            TrackLabel.Margin = new Thickness(0, 0, minimal ? 10 : 0, 0);
+
+            UpdateArtistText();
+            UpdateControlsVisibility();
+            UpdateProgress();
+            foreach (var item in StyleMenu.Items.OfType<MenuItem>())
+                item.IsChecked = (string)item.Tag == style.ToString();
+        }
+
+        private void UpdateArtistText()
+        {
+            bool twoLines = _style is WidgetStyle.Native or WidgetStyle.ProgressFill;
+            ArtistText.Text = string.IsNullOrEmpty(_artist) ? "" : twoLines ? _artist : "· " + _artist;
+        }
+
+        private void UpdateControlsVisibility()
+        {
+            bool show = _style != WidgetStyle.Minimal || Root.IsMouseOver || VolumePopup.IsOpen;
+            ControlsPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void Style_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not MenuItem { Tag: string tag } || !Enum.TryParse(tag, out WidgetStyle style)) return;
+            ApplyStyle(style);
+            Styles.Save(style);
+        }
+
+        private void Root_HoverChanged(object sender, MouseEventArgs e) => UpdateControlsVisibility();
+
+        private void VolumePopup_Closed(object? sender, EventArgs e) => UpdateControlsVisibility();
+
+        private void LinearHit_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            e.Handled = true; // seek, don't drag
+            double w = LinearHit.ActualWidth;
+            if (w > 0) SeekTo(TimeSpan.FromMilliseconds(_duration.TotalMilliseconds * Math.Clamp(e.GetPosition(LinearHit).X / w, 0, 1)));
+        }
+
         // ---------- Themes ----------
 
         private void Theme_Click(object sender, RoutedEventArgs e)
@@ -653,15 +758,44 @@ namespace SpotifyBar
 
         private void Root_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            // A press that doesn't move the window is a click: on the title or artist it opens them in Spotify.
-            object source = e.OriginalSource;
-            double left = Left, top = Top;
-            try { DragMove(); } catch { }
-
-            if (Math.Abs(Left - left) >= 1 || Math.Abs(Top - top) >= 1) SavePosition();
-            else if (source == TitleText) OpenTrack();
-            else if (source == ArtistText) OpenArtist();
+            _pressSource = e.OriginalSource;
+            _dragStartX = CursorX();
+            _dragStartLeft = Left;
+            _dragging = false;
+            Root.CaptureMouse();
+            e.Handled = true;
         }
+
+        private void Root_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_dragStartX is not double startX || !Root.IsMouseCaptured) return;
+            double dx = (CursorX() - startX) / VisualTreeHelper.GetDpi(this).DpiScaleX;
+            if (!_dragging && Math.Abs(dx) < 4) return; // small jitter is still a click
+            _dragging = true;
+            Root.Cursor = Cursors.SizeWE;
+            Left = ClampLeft(_dragStartLeft + dx);
+        }
+
+        private void Root_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (_dragStartX == null) return;
+            bool dragged = _dragging;
+            Root.ReleaseMouseCapture(); // resets drag state via LostMouseCapture
+
+            // A press that didn't move the widget is a click: on the title or artist it opens them in Spotify.
+            if (dragged) SavePosition();
+            else if (_pressSource == TitleText) OpenTrack();
+            else if (_pressSource == ArtistText) OpenArtist();
+        }
+
+        private void Root_LostMouseCapture(object sender, MouseEventArgs e)
+        {
+            _dragStartX = null;
+            _dragging = false;
+            Root.Cursor = null;
+        }
+
+        private static double CursorX() => GetCursorPos(out POINT p) ? p.X : 0;
 
         private void ResetPosition_Click(object sender, RoutedEventArgs e)
         {
@@ -720,5 +854,11 @@ namespace SpotifyBar
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder name, int max);
         [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
         [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr hMon, ref MONITORINFO mi);
+        [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string cls, string? name);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string? name);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct POINT { public int X, Y; }
     }
 }

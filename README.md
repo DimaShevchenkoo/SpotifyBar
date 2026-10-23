@@ -20,7 +20,9 @@ See what's playing, pause, skip, scrub through the track, and change Spotify's v
 - **Seeking**: click anywhere on the ring to jump to that point, or scroll the mouse wheel over the widget to move ±5 seconds.
 - **Spotify's own volume**: a speaker button opens a slider bound to the volume inside Spotify itself (the same slider you see in the app). Scroll over the speaker for 5% steps, or mute with one click.
 - **Jump into Spotify**: click the track title to open it in the Spotify app, or click the artist to open their page. On tracks with several artists you pick which one.
-- **Themes**: Dark, Light, Clear, Spotify green, or your Windows accent colour. Auto mode follows the Windows light / dark setting live.
+- **Styles**: four layouts (Pill, Native, Minimal, Progress fill) that you can switch from the right-click menu.
+- **Themes**: Dark, Light, Clear, Spotify green, or your Windows accent colour. Auto mode follows the Windows light / dark setting live. Any theme works with any style.
+- **Lives on the taskbar**: drag it left or right along the taskbar to any free spot. It starts just left of the tray and never covers the tray icons.
 - **Looks native**: a translucent pill that blends into the taskbar and highlights on hover like the taskbar's own buttons.
 - **Stays out of the way**: hides automatically when a fullscreen game or video is in front, and comes back the moment the taskbar shows up (Start, tray, search).
 - **Works without an account**: playback info and controls need no login. Connecting your Spotify account (one time, see below) adds volume and exact track / artist links.
@@ -29,6 +31,17 @@ See what's playing, pause, skip, scrub through the track, and change Spotify's v
 ### Volume
 
 <img src="docs/volume.png" width="358" alt="Volume slider above the widget">
+
+### Styles
+
+Right-click the widget → **Стиль** ("Style"):
+
+- **Pill**: round cover with a progress ring.
+- **Native**: square cover, title and artist on two lines, thin progress bar you can click to seek.
+- **Minimal**: just a note icon and the track. The buttons appear when you hover.
+- **Progress fill**: the whole widget fills up as the track plays.
+
+<img src="docs/styles.png" width="520" alt="Pill, Native, Minimal and Progress fill styles">
 
 ### Themes
 
@@ -96,16 +109,17 @@ Without a connected account, clicking the title or artist falls back to a Spotif
 | --- | --- |
 | Play / pause | Click the white button |
 | Previous / next track | Click the arrows |
-| Jump to a point in the track | Click on the progress ring (12 o'clock is the start) |
+| Jump to a point in the track | Click on the progress ring (12 o'clock is the start), or on the bar in the Native style |
 | Seek ±5 seconds | Scroll the mouse wheel over the widget |
 | See elapsed / total time | Hover over the ring |
 | Open the track in Spotify | Click the title |
 | Open the artist in Spotify | Click the artist name |
 | Change volume | Click the speaker and drag the slider, or scroll over the speaker |
 | Mute Spotify | Click the speaker icon inside the volume popup |
+| Change style | Right-click → **Стиль** |
 | Change theme | Right-click → **Тема** |
-| Move the widget | Drag it anywhere. The position is remembered. |
-| Menu: theme, Spotify account, autostart, reset position, exit | Right-click the widget |
+| Move the widget | Drag it left or right along the taskbar. The position is remembered. |
+| Menu: style, theme, Spotify account, autostart, reset position, exit | Right-click the widget |
 
 The context menu and status text are in Ukrainian.
 
@@ -118,9 +132,10 @@ The context menu and status text are in Ukrainian.
 | `SpotifyApi.cs` | Spotify Web API client: PKCE sign-in, token refresh, player state, volume |
 | `ConnectWindow.xaml` | The one-time "connect your Spotify account" dialog |
 | `Themes.cs` | Theme palettes, Windows light / dark and accent colour detection |
+| `Styles.cs` | The list of layouts and the saved choice |
 | `App.xaml` | Theme brushes, round icon button styles, and the single-instance guard |
 
-Settings are stored in `%APPDATA%\SpotifyBar\` (`position.txt` for the widget position, `theme.txt` for the theme, `spotify.dat` for the encrypted Spotify sign-in) and in the
+Settings are stored in `%APPDATA%\SpotifyBar\` (`position.txt` for the widget position, `theme.txt` for the theme, `style.txt` for the layout, `spotify.dat` for the encrypted Spotify sign-in) and in the
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key (autostart).
 
 ## License
