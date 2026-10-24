@@ -22,8 +22,7 @@ namespace SpotifyBar
         private const string AppName = "SpotifyBar";
         private static readonly TimeSpan WheelStep = TimeSpan.FromSeconds(5);
 
-        private readonly string _posFile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), AppName, "position.txt");
+        private readonly AppSettings _settings = AppSettings.Load();
 
         private readonly DispatcherTimer _uiTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
         private readonly DispatcherTimer _pollTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -96,9 +95,10 @@ namespace SpotifyBar
             Autostart.MigrateFromRunKey();
             AutostartItem.IsChecked = Autostart.IsEnabled();
 
-            Themes.Apply(Themes.Load());
+            Themes.Apply(_settings.Theme);
             UpdateThemeChecks();
-            ApplyStyle(Styles.Load());
+            ApplyStyle(_settings.Style);
+            _volumeBeforeMute = _settings.VolumeBeforeMute;
             UpdateConnectItem();
             UpdateVolumeUi();
             // Auto and accent themes follow Windows settings live.
@@ -131,7 +131,7 @@ namespace SpotifyBar
             Height = taskbarH >= 32 ? taskbarH : 48;
             Top = screenH - Height;
             // Default: just left of the tray's "show hidden icons" arrow.
-            Left = ClampLeft(TryLoadLeft() ?? TrayLeft() - Width - 8);
+            Left = ClampLeft(_settings.Left ?? TrayLeft() - Width - 8);
         }
 
         /// <summary>Left edge of the tray area (arrow, icons, clock) in DIPs.</summary>
@@ -147,28 +147,10 @@ namespace SpotifyBar
         private double ClampLeft(double left) =>
             Math.Clamp(left, 0, Math.Max(0, TrayLeft() - Width - 4));
 
-        private double? TryLoadLeft()
-        {
-            try
-            {
-                // File format is "left;top"; only left matters now that the widget always sits on the taskbar.
-                string first = File.ReadAllText(_posFile).Split(';')[0];
-                return double.TryParse(first, NumberStyles.Float, CultureInfo.InvariantCulture, out double left) ? left : null;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
         private void SavePosition()
         {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(_posFile)!);
-                File.WriteAllText(_posFile, string.Create(CultureInfo.InvariantCulture, $"{Left};{Top}"));
-            }
-            catch { }
+            _settings.Left = Left;
+            _settings.Save();
         }
 
         private async void OnForegroundChanged(IntPtr hook, uint ev, IntPtr hwnd, int obj, int child, uint thread, uint time)
@@ -522,6 +504,12 @@ namespace SpotifyBar
         private void Mute_Click(object sender, RoutedEventArgs e)
         {
             if (_apiVolume is not int level) return;
+            if (level > 0)
+            {
+                // Remember the level across restarts so unmuting later brings it back.
+                _settings.VolumeBeforeMute = level;
+                _settings.Save();
+            }
             SetVolume(level > 0 ? 0 : _volumeBeforeMute / 100.0);
         }
 
@@ -696,7 +684,8 @@ namespace SpotifyBar
         {
             if (sender is not MenuItem { Tag: string tag } || !Enum.TryParse(tag, out WidgetStyle style)) return;
             ApplyStyle(style);
-            Styles.Save(style);
+            _settings.Style = style;
+            _settings.Save();
         }
 
         private void Root_HoverChanged(object sender, MouseEventArgs e) => UpdateControlsVisibility();
@@ -716,7 +705,8 @@ namespace SpotifyBar
         {
             if (sender is not MenuItem { Tag: string tag } || !Enum.TryParse(tag, out Theme theme)) return;
             Themes.Apply(theme);
-            Themes.Save(theme);
+            _settings.Theme = theme;
+            _settings.Save();
             UpdateThemeChecks();
         }
 
@@ -806,7 +796,8 @@ namespace SpotifyBar
 
         private void ResetPosition_Click(object sender, RoutedEventArgs e)
         {
-            try { File.Delete(_posFile); } catch { }
+            _settings.Left = null;
+            _settings.Save();
             PlaceWindow();
         }
 

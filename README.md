@@ -132,11 +132,14 @@ The context menu and status text are in Ukrainian.
 | `SpotifyApi.cs` | Spotify Web API client: PKCE sign-in, token refresh, player state, volume |
 | `ConnectWindow.xaml` | The one-time "connect your Spotify account" dialog |
 | `Themes.cs` | Theme palettes, Windows light / dark and accent colour detection |
-| `Styles.cs` | The list of layouts and the saved choice |
+| `Styles.cs` | The list of layouts |
+| `AppSettings.cs` | All remembered settings in one JSON file, with migration from older versions |
 | `Autostart.cs` | Start-at-logon via a Task Scheduler task, plus migration from the old Run-key entry |
 | `App.xaml` | Theme brushes, round icon button styles, and the single-instance guard |
 
-Settings are stored in `%APPDATA%\SpotifyBar\` (`position.txt` for the widget position, `theme.txt` for the theme, `style.txt` for the layout, `spotify.dat` for the encrypted Spotify sign-in).
+Everything you change is remembered and applied on the next start. Settings live in `%APPDATA%\SpotifyBar\`:
+`settings.json` holds the theme, style, widget position, and the volume to restore after unmuting, and is saved right after each change.
+`spotify.dat` holds the encrypted Spotify sign-in.
 Autostart is a per-user Task Scheduler task named `SpotifyBar` that runs at logon. The `HKCU\...\Run` key turned out to be
 skipped silently by Explorer on recent Windows 11 builds, so older installs are migrated to the task automatically.
 

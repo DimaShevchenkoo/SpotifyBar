@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
@@ -13,26 +11,7 @@ namespace SpotifyBar
     /// </summary>
     internal static class Themes
     {
-        private static readonly string ThemeFile = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpotifyBar", "theme.txt");
-
         public static Theme Current { get; private set; } = Theme.Auto;
-
-        public static Theme Load()
-        {
-            try { return Enum.TryParse(File.ReadAllText(ThemeFile).Trim(), out Theme t) ? t : Theme.Auto; }
-            catch { return Theme.Auto; }
-        }
-
-        public static void Save(Theme theme)
-        {
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(ThemeFile)!);
-                File.WriteAllText(ThemeFile, theme.ToString());
-            }
-            catch { }
-        }
 
         public static void Apply(Theme theme)
         {
