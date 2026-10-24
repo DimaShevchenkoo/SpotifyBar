@@ -19,10 +19,7 @@ namespace SpotifyBar
 {
     public partial class MainWindow : Window
     {
-        private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
         private const string AppName = "SpotifyBar";
-        private const string StartupApprovedKey = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
-        private static readonly byte[] StartupEnabled = { 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
         private static readonly TimeSpan WheelStep = TimeSpan.FromSeconds(5);
 
         private readonly string _posFile = Path.Combine(
@@ -52,6 +49,7 @@ namespace SpotifyBar
         private GlobalSystemMediaTransportControlsSession? _session;
         private IntPtr _hwnd;
         private IntPtr _hookHandle;
+        private uint _taskbarCreatedMsg;
         private WinEventProc? _foregroundHook; // kept in a field so the GC doesn't collect the callback
         private bool _hiddenForFullscreen;
         private bool _polling;
@@ -89,8 +87,14 @@ namespace SpotifyBar
             SetWindowLong(_hwnd, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
 
             PlaceWindow();
-            RepairAutostartFlag();
-            AutostartItem.IsChecked = IsAutostartEnabled();
+            // Explorer broadcasts "TaskbarCreated" when the taskbar appears or restarts; at logon we may
+            // start before it exists, so re-measure the taskbar and tray then.
+            _taskbarCreatedMsg = RegisterWindowMessage("TaskbarCreated");
+            HwndSource.FromHwnd(_hwnd)?.AddHook(WndProc);
+            SystemEvents.DisplaySettingsChanged += (_, _) => Dispatcher.InvokeAsync(PlaceWindow);
+
+            Autostart.MigrateFromRunKey();
+            AutostartItem.IsChecked = Autostart.IsEnabled();
 
             Themes.Apply(Themes.Load());
             UpdateThemeChecks();
@@ -808,40 +812,16 @@ namespace SpotifyBar
 
         private void Autostart_Click(object sender, RoutedEventArgs e)
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-            using var approved = Registry.CurrentUser.CreateSubKey(StartupApprovedKey, writable: true);
-            if (key == null) return;
-            if (AutostartItem.IsChecked)
-            {
-                key.SetValue(AppName, $"\"{Environment.ProcessPath}\"");
-                // Recent Windows 11 builds skip Run entries that have no "enabled" flag here
-                // (the same flag Task Manager's Startup apps toggle writes).
-                approved?.SetValue(AppName, StartupEnabled, RegistryValueKind.Binary);
-            }
-            else
-            {
-                key.DeleteValue(AppName, throwOnMissingValue: false);
-                approved?.DeleteValue(AppName, throwOnMissingValue: false);
-            }
+            if (AutostartItem.IsChecked) Autostart.Enable();
+            else Autostart.Disable();
+            AutostartItem.IsChecked = Autostart.IsEnabled();
         }
 
-        private static bool IsAutostartEnabled()
+        private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            using var approved = Registry.CurrentUser.OpenSubKey(StartupApprovedKey);
-            // First byte 0x02 = enabled; odd values mean the user switched it off in Task Manager / Settings.
-            bool disabled = approved?.GetValue(AppName) is byte[] flag && flag.Length > 0 && (flag[0] & 1) == 1;
-            return key?.GetValue(AppName) is string && !disabled;
-        }
-
-        /// <summary>Old installs wrote only the Run value; add the missing "enabled" flag so they start again.</summary>
-        private static void RepairAutostartFlag()
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            if (key?.GetValue(AppName) is not string) return;
-            using var approved = Registry.CurrentUser.CreateSubKey(StartupApprovedKey, writable: true);
-            if (approved != null && approved.GetValue(AppName) == null)
-                approved.SetValue(AppName, StartupEnabled, RegistryValueKind.Binary);
+            if (_taskbarCreatedMsg != 0 && (uint)msg == _taskbarCreatedMsg)
+                Dispatcher.InvokeAsync(PlaceWindow);
+            return IntPtr.Zero;
         }
 
         private void Exit_Click(object sender, RoutedEventArgs e) => Application.Current.Shutdown();
@@ -880,6 +860,7 @@ namespace SpotifyBar
         [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hWnd, uint flags);
         [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr hMon, ref MONITORINFO mi);
         [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT p);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterWindowMessage(string name);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindow(string cls, string? name);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string? name);
 
